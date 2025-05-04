@@ -1,119 +1,90 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.3.0' // Use Spring Boot 3
+    id 'org.springframework.boot' version '3.2.5' // Use stable Spring Boot 3 version
     id 'io.spring.dependency-management' version '1.1.5'
     id 'application' // Keep application plugin for main class definition
-    id "com.github.node-gradle.node" version "7.0.2" // For managing Node/React build
+    // Removed: id "com.github.node-gradle.node" version "7.0.2"
 }
 
 group = 'log.dashboard'
 version = '0.0.1-SNAPSHOT'
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+sourceCompatibility = '17'
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
     }
 }
 
 repositories {
     mavenCentral()
+
+    // *** IMPORTANT: If you cannot access public repositories, uncomment and configure your internal Nexus/Artifactory repository below ***
+    // maven {
+    //     url "YOUR_INTERNAL_NEXUS_OR_ARTIFACTORY_URL"
+    //     // If your repository requires authentication, uncomment and configure credentials:
+    //     // credentials {
+    //     //     username "YOUR_USERNAME"
+    //     //     password "YOUR_PASSWORD_OR_API_KEY"
+    //     // }
+    // }
 }
 
-def awsSdkVersion = '2.26.18' // Consistent AWS SDK version
-def springCloudVersion = '2023.0.2' // Spring Cloud version compatible with Boot 3.3
+ext {
+    set('springCloudVersion', "2023.0.1") // Check compatibility with Spring Boot 3.2.5
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-vault-config'
+    implementation 'org.springframework.cloud:spring-cloud-starter-bootstrap' // Needed for Vault config loading
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // AWS SDK v2 for S3 (using BOM for version management)
+    implementation platform('software.amazon.awssdk:bom:2.20.47')
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:url-connection-client' // Using URLConnection client for simplicity
+
+    // Jackson (usually included with spring-boot-starter-web, but explicit for clarity)
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // Optional: If using AppRole authentication with Vault (Included via starter)
+    // implementation 'org.springframework.vault:spring-vault-approle'
+}
 
 dependencyManagement {
     imports {
         mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
-        mavenBom "software.amazon.awssdk:bom:${awsSdkVersion}"
     }
 }
 
-dependencies {
-    // Spring Boot
-    implementation 'org.springframework.boot:spring-boot-starter-web'
-    implementation 'org.springframework.boot:spring-boot-starter-actuator' // For health checks etc.
-    implementation 'org.springframework.boot:spring-boot-starter-validation' // Add validation starter
-
-    // Spring Cloud Vault (for Vault integration)
-    implementation 'org.springframework.cloud:spring-cloud-starter-vault-config'
-    // Optional: If using AppRole authentication with Vault (Included via starter)
-    // implementation 'org.springframework.vault:spring-vault-approle'
-
-    // AWS SDK v2 (managed by BOM)
-    implementation 'software.amazon.awssdk:s3'
-    implementation 'software.amazon.awssdk:url-connection-client' // Or apache-client
-
-    // Lombok (optional, for reducing boilerplate)
-    // compileOnly 'org.projectlombok:lombok'
-    // annotationProcessor 'org.projectlombok:lombok'
-
-    // Testing
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    // Ensure JUnit 5 is used (should be default with Boot 3)
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-}
-
 application {
-    mainClass = 'log.dashboard.LogDashboardApplication' // Set your main Spring Boot class
+    mainClass = 'log.dashboard.LogDashboardApplication'
 }
 
 tasks.named('test') {
     useJUnitPlatform()
 }
 
-// --- React Frontend Integration --- 
+// Removed Node/React build integration tasks (npmInstallReact, buildReactApp)
 
-// Define source and output directories for the frontend build
-def frontendDir = "${projectDir}/src/main/frontend"
-def frontendBuildDir = "${frontendDir}/build"
-def springBootStaticDir = "${projectDir}/src/main/resources/static"
-
-// Configure Node.js plugin
-node {
-    version = '20.11.1' // Specify Node.js version
-    npmVersion = '10.2.4' // Specify npm version (or use pnpm if preferred)
-    download = true
-    workDir = file("${project.buildDir}/nodejs")
-    npmWorkDir = file("${project.buildDir}/npm")
-}
-
-// Task to install frontend dependencies
-task npmInstallDependencies(type: NpmTask) {
-    description = "Install Node.js packages."
-    workingDir = file(frontendDir)
-    args = ['install']
-}
-
-// Task to build the React frontend
-task buildFrontend(type: NpmTask, dependsOn: npmInstallDependencies) {
-    description = "Build the React frontend."
-    workingDir = file(frontendDir)
-    environment = ["CI": "true"] // Ensure build doesn't hang on warnings in CI
-    args = ['run', 'build']
-}
-
-// Task to copy the built frontend artifacts to Spring Boot's static resources directory
-task copyFrontendBuild(type: Copy, dependsOn: buildFrontend) {
-    description = "Copy frontend build artifacts to Spring Boot static directory."
-    from frontendBuildDir
-    into springBootStaticDir
-}
-
-// Make the Spring Boot 'processResources' task depend on copying the frontend build
+// Copy React build output (assuming it's manually built) to Spring Boot static resources
 processResources {
-    dependsOn copyFrontendBuild
+    // Ensure the frontend is built manually before running this task
+    from("${project.projectDir}/src/main/frontend/build") {
+        into 'static'
+    }
 }
 
-// Clean task extension to remove frontend build artifacts
-clean {
-    delete frontendBuildDir
-    delete springBootStaticDir
-}
-
-// Ensure the Spring Boot JAR includes the static frontend resources
+// Configure Spring Boot executable JAR/WAR
 bootJar {
-    dependsOn copyFrontendBuild
-    from(springBootStaticDir) { into 'static' } // Ensure static files are in BOOT-INF/classes/static
+    // Ensures the static content from the manually built React app is included
+    from("${project.projectDir}/src/main/frontend/build") {
+        into 'BOOT-INF/classes/static'
+    }
 }
 
